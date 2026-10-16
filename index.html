@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>كشف الحساب</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--blue:#2895FE;--soft:#E5F1FF;--field:#F2F6FF;--ink:#1B2C47;--muted:#8EA1B1;--green:#62C36A;--greensoft:#CEE8CF;--red:#FA6C6B;--redsoft:#FCE4E6;--line:#D8E6F5}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:#fff;color:var(--ink);font-family:'Cairo',system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif}
+.wrap{max-width:560px;margin:0 auto;padding:12px 16px 40px}
+.top{display:flex;align-items:center;gap:10px;padding:8px 0 4px;color:var(--ink);font-weight:600;font-size:16px}
+.top svg{width:28px;height:28px}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 6px rgba(0,0,0,.10);padding:16px 20px;margin:10px 0}
+.card .nm{color:var(--blue);font-weight:700;font-size:18px}
+.card .lb{color:var(--muted);font-size:13px;margin-top:10px}
+.card .am{font-size:34px;font-weight:600;line-height:1.3}
+.card .st{color:var(--muted);font-size:13px}
+.red{color:var(--red)}.green{color:var(--green)}.gray{color:var(--muted)}
+h3{margin:18px 0 6px;font-size:16px;color:var(--blue)}
+h3 span{color:var(--muted);font-weight:400}
+.row{display:flex;gap:12px;align-items:flex-start;padding:14px 0;border-bottom:1.2px solid var(--line)}
+.ic{flex:none;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center}
+.ic svg{width:22px;height:22px}
+.ic.r{background:var(--redsoft)}.ic.g{background:var(--greensoft)}
+.mid{flex:1;min-width:0}
+.mid .d{font-size:15px;font-weight:600}
+.mid .b{font-size:12px;margin-top:2px}
+.mid .n{font-size:14px;margin-top:3px;word-break:break-word}
+.mid .s{font-size:12px;color:var(--blue);margin-top:2px}
+.mid img{display:block;margin-top:8px;width:84px;height:84px;object-fit:cover;border-radius:12px;background:var(--soft);cursor:zoom-in}
+.end{text-align:left;flex:none}
+.end .a{font-size:16px;font-weight:600}
+.end .t{font-size:12px;color:var(--muted)}
+.center{text-align:center;color:var(--muted);padding:60px 10px;font-size:15px}
+.err{color:var(--red)}
+.foot{margin-top:22px;text-align:center;color:var(--muted);font-size:12px}
+.btn{display:inline-block;margin-top:10px;background:var(--field);color:var(--blue);border:0;border-radius:12px;padding:10px 18px;font:600 14px 'Cairo',sans-serif;cursor:pointer}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:9}
+#lb img{max-width:96%;max-height:92%;border-radius:8px}
+@media print{.btn,#lb{display:none!important}.card{box-shadow:none;border:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#2895FE" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5.5C4.5 4.5 8 4.5 12 6.5c4-2 7.5-2 10-1V19c-2.5-1-6-1-10 1-4-2-7.5-2-10-1z"/><path d="M12 6.5V20"/></svg>
+    <span>كشف حساب</span>
+  </div>
+  <div id="app"><div class="center">جارٍ التحميل…</div></div>
+</div>
+<div id="lb"><img alt=""></div>
+<script>
+const PROJECT = 'daftar-dettes';
+const BASE = 'https://firestore.googleapis.com/v1/projects/' + PROJECT + '/databases/(default)/documents';
+const token = new URLSearchParams(location.search).get('c') || '';
+const MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = n => Math.abs(n).toLocaleString('en-US', {maximumFractionDigits: 2}) + ' د.ج';
+const two = n => String(n).padStart(2, '0');
+const fmtFull = d => d ? (d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear() + ' ساعة ' + two(d.getHours()) + ':' + two(d.getMinutes())) : '';
+
+function val(v){
+  if (!v) return null;
+  if ('stringValue' in v) return v.stringValue;
+  if ('integerValue' in v) return Number(v.integerValue);
+  if ('doubleValue' in v) return v.doubleValue;
+  if ('timestampValue' in v) return new Date(v.timestampValue);
+  if ('booleanValue' in v) return v.booleanValue;
+  return null;
+}
+function toDoc(d){
+  const o = {_id: d.name.split('/').pop()};
+  const f = d.fields || {};
+  for (const k in f) o[k] = val(f[k]);
+  return o;
+}
+async function getJson(url){
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(String(r.status));
+  return r.json();
+}
+
+const ICON_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="#FA6C6B" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+const ICON_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="#62C36A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>';
+
+async function main(){
+  const app = $('#app');
+  if (!token) { app.innerHTML = '<div class="center err">الرابط غير صالح.</div>'; return; }
+  let head, txs = [];
+  try {
+    head = toDoc(await getJson(BASE + '/shares/' + encodeURIComponent(token)));
+    let pageToken = '';
+    do {
+      const j = await getJson(BASE + '/shares/' + encodeURIComponent(token) + '/tx?pageSize=300' + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''));
+      (j.documents || []).forEach(d => txs.push(toDoc(d)));
+      pageToken = j.nextPageToken || '';
+    } while (pageToken);
+  } catch (e) {
+    app.innerHTML = '<div class="center err">الرابط غير صالح أو تم إيقافه.</div>';
+    return;
+  }
+
+  const now = new Date();
+  txs.sort((a, b) => (a.ts || now) - (b.ts || now));
+  let run = 0;
+  txs.forEach(t => { run += (t.amount || 0); t.after = run; });
+  const bal = head.balance || 0;
+  const cls = bal > 0 ? 'red' : (bal < 0 ? 'green' : 'gray');
+  const lab = bal > 0 ? 'المتبقي عليك' : (bal < 0 ? 'رصيد لك عندنا' : 'الحساب مسدَّد');
+
+  let html = '<div class="card"><div class="nm">' + esc(head.name) + '</div>' +
+    '<div class="lb">الرصيد الحالي</div>' +
+    '<div class="am ' + cls + '">' + money(bal) + '</div>' +
+    '<div class="st">' + lab + '</div></div>';
+  html += '<h3>المعاملات <span>(' + txs.length + ')</span></h3>';
+  if (!txs.length) html += '<div class="center">لا توجد معاملات.</div>';
+  txs.slice().reverse().forEach(t => {
+    const pos = (t.amount || 0) > 0;
+    const aCls = pos ? 'red' : 'green';
+    const bCls = t.after > 0 ? 'red' : (t.after < 0 ? 'green' : 'gray');
+    html += '<div class="row">' +
+      '<div class="ic ' + (pos ? 'r' : 'g') + '">' + (pos ? ICON_UP : ICON_DOWN) + '</div>' +
+      '<div class="mid"><div class="d">' + esc(fmtFull(t.ts)) + '</div>' +
+      '<div class="b ' + bCls + '">الرصيد: ' + (t.after < 0 ? '-' : '') + money(t.after) + '</div>' +
+      (t.sub ? '<div class="s">الفرع: ' + esc(t.sub) + '</div>' : '') +
+      (t.note ? '<div class="n">' + esc(t.note) + '</div>' : '') +
+      (t.hasImg ? '<img data-id="' + esc(t._id) + '" alt="صورة المعاملة">' : '') +
+      '</div>' +
+      '<div class="end"><div class="a ' + aCls + '">' + money(t.amount || 0) + '</div><div class="t">' + (pos ? 'دين' : 'تسديد') + '</div></div>' +
+      '</div>';
+  });
+  html += '<div class="foot">آخر تحديث: ' + esc(fmtFull(head.updatedAt)) + '<br><button class="btn" onclick="window.print()">طباعة / حفظ PDF</button></div>';
+  app.innerHTML = html;
+
+  // تحميل الصور عند ظهورها فقط
+  const io = new IntersectionObserver(es => {
+    es.forEach(en => {
+      if (!en.isIntersecting) return;
+      const img = en.target; io.unobserve(img);
+      getJson(BASE + '/shares/' + encodeURIComponent(token) + '/imgs/' + encodeURIComponent(img.dataset.id))
+        .then(d => { const o = toDoc(d); if (o.data) img.src = 'data:image/jpeg;base64,' + o.data; })
+        .catch(() => { img.style.display = 'none'; });
+    });
+  }, {rootMargin: '300px'});
+  document.querySelectorAll('img[data-id]').forEach(i => io.observe(i));
+  app.addEventListener('click', e => {
+    const i = e.target.closest('img[data-id]');
+    if (i && i.src) { $('#lb img').src = i.src; $('#lb').style.display = 'flex'; }
+  });
+  $('#lb').addEventListener('click', () => { $('#lb').style.display = 'none'; });
+}
+main();
+</script>
+</body>
+</html>
