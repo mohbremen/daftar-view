@@ -22,6 +22,16 @@ html,body{margin:0;background:#fff;color:var(--ink);font-family:'Cairo',system-u
 .red{color:var(--red)}.green{color:var(--green)}.gray{color:var(--muted)}
 h3{margin:18px 0 6px;font-size:16px;color:var(--blue)}
 h3 span{color:var(--muted);font-weight:400}
+.hint{color:var(--muted);font-size:12px;margin:-2px 0 8px}
+.grp{display:flex;align-items:center;gap:10px;padding:12px 14px;margin:6px 0;border:1.5px solid var(--line);border-radius:12px;cursor:pointer;background:#fff}
+.grp.sel{border-color:var(--blue);background:var(--field)}
+.grp .gn{flex:1;min-width:0;font-size:15px;font-weight:600;word-break:break-word}
+.grp .gc{display:block;font-size:12px;color:var(--muted);font-weight:400}
+.grp .ga{text-align:left;flex:none}
+.grp .ga b{display:block;font-size:16px;font-weight:600}
+.grp .ga i{font-style:normal;font-size:12px;color:var(--muted)}
+.flt{display:flex;align-items:center;gap:8px;justify-content:space-between;margin:4px 0 0}
+.flt .btn{margin:0;padding:6px 12px;font-size:13px}
 .row{display:flex;gap:12px;align-items:flex-start;padding:14px 0;border-bottom:1.2px solid var(--line)}
 .ic{flex:none;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center}
 .ic svg{width:22px;height:22px}
@@ -41,7 +51,7 @@ h3 span{color:var(--muted);font-weight:400}
 .btn{display:inline-block;margin-top:10px;background:var(--field);color:var(--blue);border:0;border-radius:12px;padding:10px 18px;font:600 14px 'Cairo',sans-serif;cursor:pointer}
 #lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:9}
 #lb img{max-width:96%;max-height:92%;border-radius:8px}
-@media print{.btn,#lb{display:none!important}.card{box-shadow:none;border:1px solid var(--line)}}
+@media print{.btn,#lb{display:none!important}.card{box-shadow:none;border:1px solid var(--line)}.grp{cursor:default}}
 </style>
 </head>
 <body>
@@ -58,6 +68,7 @@ const PROJECT = 'daftar-dettes';
 const BASE = 'https://firestore.googleapis.com/v1/projects/' + PROJECT + '/databases/(default)/documents';
 const token = new URLSearchParams(location.search).get('c') || '';
 const MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+const DIRECT = 'تاعو';
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = n => Math.abs(n).toLocaleString('en-US', {maximumFractionDigits: 2}) + ' د.ج';
@@ -88,10 +99,97 @@ async function getJson(url){
 const ICON_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="#FA6C6B" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
 const ICON_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="#62C36A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>';
 
+let head, txs = [], rows = [], hasSubs = false, filter = null, io = null;
+
+function balCls(b){ return b > 0 ? 'red' : (b < 0 ? 'green' : 'gray'); }
+function balLab(b){ return b > 0 ? 'دين' : (b < 0 ? 'لك' : 'مسدَّد'); }
+
+function prepare(){
+  const now = new Date();
+  txs.sort((a, b) => (a.ts || now) - (b.ts || now));
+  let run = 0;
+  const groups = new Map();
+  txs.forEach(t => {
+    run += (t.amount || 0); t.after = run;
+    const k = t.sub || '';
+    let g = groups.get(k);
+    if (!g) { g = {key: k, bal: 0, count: 0, last: 0}; groups.set(k, g); }
+    g.bal += (t.amount || 0); g.count++; t.afterG = g.bal;
+    const tm = t.ts ? t.ts.getTime() : 0;
+    if (tm > g.last) g.last = tm;
+  });
+  hasSubs = [...groups.keys()].some(k => k !== '');
+  // الترتيب: "تاعو" أولاً ثم الفروع من الأحدث تعاملاً إلى الأقدم
+  rows = [];
+  if (groups.has('')) rows.push(groups.get(''));
+  [...groups.values()].filter(g => g.key !== '').sort((a, b) => b.last - a.last).forEach(g => rows.push(g));
+}
+
+function render(){
+  const app = $('#app');
+  const bal = head.balance || 0;
+  const lab = bal > 0 ? 'المتبقي عليك' : (bal < 0 ? 'رصيد لك عندنا' : 'الحساب مسدَّد');
+  let html = '<div class="card"><div class="nm">' + esc(head.name) + '</div>' +
+    '<div class="lb">الرصيد الحالي</div>' +
+    '<div class="am ' + balCls(bal) + '">' + money(bal) + '</div>' +
+    '<div class="st">' + lab + '</div></div>';
+
+  if (hasSubs) {
+    html += '<h3>الفروع <span>(' + rows.filter(r => r.key !== '').length + ')</span></h3>';
+    html += '<div class="hint">اضغط على فرع لعرض معاملاته فقط</div>';
+    html += '<div class="grp' + (filter === null ? ' sel' : '') + '" data-i="-1"><div class="gn">الكل<span class="gc">' + txs.length + ' معاملة</span></div>' +
+      '<div class="ga"><b class="' + balCls(bal) + '">' + money(bal) + '</b><i>' + balLab(bal) + '</i></div></div>';
+    rows.forEach((g, i) => {
+      html += '<div class="grp' + (filter === g.key ? ' sel' : '') + '" data-i="' + i + '"><div class="gn">' + esc(g.key === '' ? DIRECT : g.key) +
+        '<span class="gc">' + g.count + ' معاملة</span></div>' +
+        '<div class="ga"><b class="' + balCls(g.bal) + '">' + money(g.bal) + '</b><i>' + balLab(g.bal) + '</i></div></div>';
+    });
+  }
+
+  const list = filter === null ? txs : txs.filter(t => (t.sub || '') === filter);
+  html += '<h3 id="txh">المعاملات <span>(' + list.length + ')</span></h3>';
+  if (filter !== null) {
+    html += '<div class="flt"><span class="gray" style="font-size:13px">' + esc(filter === '' ? DIRECT : 'الفرع: ' + filter) + '</span>' +
+      '<button class="btn" data-i="-1">عرض الكل</button></div>';
+  }
+  if (!list.length) html += '<div class="center">لا توجد معاملات.</div>';
+  list.slice().reverse().forEach(t => {
+    const pos = (t.amount || 0) > 0;
+    const aCls = pos ? 'red' : 'green';
+    const shown = filter === null ? t.after : t.afterG;
+    const bCls = balCls(shown);
+    const where = t.sub ? 'الفرع: ' + t.sub : (hasSubs ? DIRECT : '');
+    html += '<div class="row">' +
+      '<div class="ic ' + (pos ? 'r' : 'g') + '">' + (pos ? ICON_UP : ICON_DOWN) + '</div>' +
+      '<div class="mid"><div class="d">' + esc(fmtFull(t.ts)) + '</div>' +
+      '<div class="b ' + bCls + '">الرصيد: ' + (shown < 0 ? '-' : '') + money(shown) + '</div>' +
+      (where ? '<div class="s">' + esc(where) + '</div>' : '') +
+      (t.note ? '<div class="n">' + esc(t.note) + '</div>' : '') +
+      (t.hasImg ? '<img data-id="' + esc(t._id) + '" alt="صورة المعاملة">' : '') +
+      '</div>' +
+      '<div class="end"><div class="a ' + aCls + '">' + money(t.amount || 0) + '</div><div class="t">' + (pos ? 'دين' : 'تسديد') + '</div></div>' +
+      '</div>';
+  });
+  html += '<div class="foot">آخر تحديث: ' + esc(fmtFull(head.updatedAt)) + '<br><button class="btn" onclick="window.print()">طباعة / حفظ PDF</button></div>';
+  app.innerHTML = html;
+
+  // تحميل الصور عند ظهورها فقط
+  if (io) io.disconnect();
+  io = new IntersectionObserver(es => {
+    es.forEach(en => {
+      if (!en.isIntersecting) return;
+      const img = en.target; io.unobserve(img);
+      getJson(BASE + '/shares/' + encodeURIComponent(token) + '/imgs/' + encodeURIComponent(img.dataset.id))
+        .then(d => { const o = toDoc(d); if (o.data) img.src = 'data:image/jpeg;base64,' + o.data; })
+        .catch(() => { img.style.display = 'none'; });
+    });
+  }, {rootMargin: '300px'});
+  document.querySelectorAll('img[data-id]').forEach(i => io.observe(i));
+}
+
 async function main(){
   const app = $('#app');
   if (!token) { app.innerHTML = '<div class="center err">الرابط غير صالح.</div>'; return; }
-  let head, txs = [];
   try {
     head = toDoc(await getJson(BASE + '/shares/' + encodeURIComponent(token)));
     let pageToken = '';
@@ -104,53 +202,20 @@ async function main(){
     app.innerHTML = '<div class="center err">الرابط غير صالح أو تم إيقافه.</div>';
     return;
   }
+  prepare();
+  render();
 
-  const now = new Date();
-  txs.sort((a, b) => (a.ts || now) - (b.ts || now));
-  let run = 0;
-  txs.forEach(t => { run += (t.amount || 0); t.after = run; });
-  const bal = head.balance || 0;
-  const cls = bal > 0 ? 'red' : (bal < 0 ? 'green' : 'gray');
-  const lab = bal > 0 ? 'المتبقي عليك' : (bal < 0 ? 'رصيد لك عندنا' : 'الحساب مسدَّد');
-
-  let html = '<div class="card"><div class="nm">' + esc(head.name) + '</div>' +
-    '<div class="lb">الرصيد الحالي</div>' +
-    '<div class="am ' + cls + '">' + money(bal) + '</div>' +
-    '<div class="st">' + lab + '</div></div>';
-  html += '<h3>المعاملات <span>(' + txs.length + ')</span></h3>';
-  if (!txs.length) html += '<div class="center">لا توجد معاملات.</div>';
-  txs.slice().reverse().forEach(t => {
-    const pos = (t.amount || 0) > 0;
-    const aCls = pos ? 'red' : 'green';
-    const bCls = t.after > 0 ? 'red' : (t.after < 0 ? 'green' : 'gray');
-    html += '<div class="row">' +
-      '<div class="ic ' + (pos ? 'r' : 'g') + '">' + (pos ? ICON_UP : ICON_DOWN) + '</div>' +
-      '<div class="mid"><div class="d">' + esc(fmtFull(t.ts)) + '</div>' +
-      '<div class="b ' + bCls + '">الرصيد: ' + (t.after < 0 ? '-' : '') + money(t.after) + '</div>' +
-      (t.sub ? '<div class="s">الفرع: ' + esc(t.sub) + '</div>' : '') +
-      (t.note ? '<div class="n">' + esc(t.note) + '</div>' : '') +
-      (t.hasImg ? '<img data-id="' + esc(t._id) + '" alt="صورة المعاملة">' : '') +
-      '</div>' +
-      '<div class="end"><div class="a ' + aCls + '">' + money(t.amount || 0) + '</div><div class="t">' + (pos ? 'دين' : 'تسديد') + '</div></div>' +
-      '</div>';
-  });
-  html += '<div class="foot">آخر تحديث: ' + esc(fmtFull(head.updatedAt)) + '<br><button class="btn" onclick="window.print()">طباعة / حفظ PDF</button></div>';
-  app.innerHTML = html;
-
-  // تحميل الصور عند ظهورها فقط
-  const io = new IntersectionObserver(es => {
-    es.forEach(en => {
-      if (!en.isIntersecting) return;
-      const img = en.target; io.unobserve(img);
-      getJson(BASE + '/shares/' + encodeURIComponent(token) + '/imgs/' + encodeURIComponent(img.dataset.id))
-        .then(d => { const o = toDoc(d); if (o.data) img.src = 'data:image/jpeg;base64,' + o.data; })
-        .catch(() => { img.style.display = 'none'; });
-    });
-  }, {rootMargin: '300px'});
-  document.querySelectorAll('img[data-id]').forEach(i => io.observe(i));
   app.addEventListener('click', e => {
-    const i = e.target.closest('img[data-id]');
-    if (i && i.src) { $('#lb img').src = i.src; $('#lb').style.display = 'flex'; }
+    const img = e.target.closest('img[data-id]');
+    if (img && img.src) { $('#lb img').src = img.src; $('#lb').style.display = 'flex'; return; }
+    const g = e.target.closest('[data-i]');
+    if (g) {
+      const i = Number(g.dataset.i);
+      filter = i < 0 ? null : rows[i].key;
+      render();
+      const h = document.getElementById('txh');
+      if (h) h.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
   });
   $('#lb').addEventListener('click', () => { $('#lb').style.display = 'none'; });
 }
