@@ -41,6 +41,8 @@ h3 span{color:var(--muted);font-weight:400}
 .mid .b{font-size:12px;margin-top:2px}
 .mid .n{font-size:14px;margin-top:3px;word-break:break-word}
 .mid .s{font-size:12px;color:var(--blue);margin-top:2px}
+.aud{display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:var(--field);color:var(--blue);border:0;border-radius:20px;padding:8px 14px;font:600 13px 'Cairo',sans-serif;cursor:pointer}
+.mid audio{display:block;margin-top:8px;width:100%;max-width:260px;height:40px}
 .mid img{display:block;margin-top:8px;width:84px;height:84px;object-fit:cover;border-radius:12px;background:var(--soft);cursor:zoom-in}
 .end{text-align:left;flex:none}
 .end .a{font-size:16px;font-weight:600}
@@ -71,7 +73,7 @@ const MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','
 const DIRECT = 'تاعو';
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const money = n => Math.abs(n).toLocaleString('en-US', {maximumFractionDigits: 2}) + ' د.ج';
+const money = n => (Math.round(Math.abs(n) * 100) / 100).toFixed(2) + ' د.ج';
 const two = n => String(n).padStart(2, '0');
 const fmtFull = d => d ? (d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear() + ' ساعة ' + two(d.getHours()) + ':' + two(d.getMinutes())) : '';
 
@@ -119,10 +121,8 @@ function prepare(){
     if (tm > g.last) g.last = tm;
   });
   hasSubs = [...groups.keys()].some(k => k !== '');
-  // الترتيب: "تاعو" أولاً ثم الفروع من الأحدث تعاملاً إلى الأقدم
-  rows = [];
-  if (groups.has('')) rows.push(groups.get(''));
-  [...groups.values()].filter(g => g.key !== '').sort((a, b) => b.last - a.last).forEach(g => rows.push(g));
+  // الترتيب: كل الفروع (ومنها "تاعو") من الأحدث تعاملاً إلى الأقدم
+  rows = [...groups.values()].sort((a, b) => b.last - a.last);
 }
 
 function render(){
@@ -166,6 +166,7 @@ function render(){
       (where ? '<div class="s">' + esc(where) + '</div>' : '') +
       (t.note ? '<div class="n">' + esc(t.note) + '</div>' : '') +
       (t.hasImg ? '<img data-id="' + esc(t._id) + '" alt="صورة المعاملة">' : '') +
+      (t.hasAudio ? '<button class="aud" data-aid="' + esc(t._id) + '">▶ تشغيل التسجيل الصوتي</button>' : '') +
       '</div>' +
       '<div class="end"><div class="a ' + aCls + '">' + money(t.amount || 0) + '</div><div class="t">' + (pos ? 'دين' : 'تسديد') + '</div></div>' +
       '</div>';
@@ -205,7 +206,23 @@ async function main(){
   prepare();
   render();
 
-  app.addEventListener('click', e => {
+  app.addEventListener('click', async e => {
+    const ab = e.target.closest('.aud');
+    if (ab) {
+      ab.textContent = 'جارٍ التحميل…'; ab.disabled = true;
+      try {
+        const o = toDoc(await getJson(BASE + '/shares/' + encodeURIComponent(token) + '/imgs/' + encodeURIComponent(ab.dataset.aid + '_a')));
+        if (!o.data) throw new Error('empty');
+        const au = document.createElement('audio');
+        au.controls = true; au.autoplay = true;
+        au.src = 'data:audio/mp4;base64,' + o.data;
+        ab.replaceWith(au);
+        au.play().catch(() => {});
+      } catch (err) {
+        ab.textContent = 'تعذّر تحميل التسجيل'; ab.disabled = false;
+      }
+      return;
+    }
     const img = e.target.closest('img[data-id]');
     if (img && img.src) { $('#lb img').src = img.src; $('#lb').style.display = 'flex'; return; }
     const g = e.target.closest('[data-i]');
